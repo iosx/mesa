@@ -3,7 +3,7 @@ build-arm64
 build-mipsel
 misra-lan969x-lm
 bin
-release_ws
+ws
 *~
 images
 .version
