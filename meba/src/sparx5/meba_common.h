@@ -38,6 +38,7 @@ typedef enum {
     VTSS_BOARD_CONF_48x1G_4x10G_4x25G_NPI,
     VTSS_BOARD_CONF_36x1G_4x2G5_4x25G_NPI,
     VTSS_BOARD_CONF_10x10G_4x25G_NPI,
+    VTSS_BOARD_CONF_AIU_33,
     VTSS_BOARD_CONF_LAST
 } board_port_cfg_t;
 
@@ -52,6 +53,7 @@ typedef struct meba_board_state {
     const mesa_fan_conf_t *fan_spec;
     mesa_bool_t            beaglebone;
     mesa_bool_t            ls1046;
+    mesa_bool_t            aiu;
     mesa_bool_t            gpy241_present;
     mesa_bool_t            viper_present;
     mesa_bool_t            malibu_present;

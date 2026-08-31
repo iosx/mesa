@@ -13,3 +13,5 @@ ID
 logcmd.rb.lock
 mesa/docs/html/
 mesa-doc.html
+arm64
+*.tar
