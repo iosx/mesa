@@ -136,6 +136,12 @@ macro(IMG_TARGET)
         set(KERNEL "${RELOCATED_HOST_DIR}/../mscc-linux-kernel.bin.gz")
     endif()
 
+    # Custom .dtb are only built for the machines that reference them.
+    set(MACHINE_CUSTOM_DTBS)
+    if (A_MACHINE IN_LIST CUSTOM_DTB_MACHINES)
+        set(MACHINE_CUSTOM_DTBS ${CUSTOM_DTBS})
+    endif()
+
     option(IMG_${A_NAME}_${A_TYPE} "Build the MESA DEMO firmware image for ${A_MESA}/${A_MEBA}" OFF)
     if (${BUILD_MESA_IMG_ALL} OR ${BUILD_ALL})
         set(IMG_${A_NAME}_${A_TYPE} ON CACHE BOOL "" FORCE)
@@ -188,7 +194,7 @@ macro(IMG_TARGET)
         if (${A_TYPE} STREQUAL "fit")
             add_custom_command(
                 OUTPUT ${A_NAME}.itb
-                DEPENDS ${KERNEL} ${EXECUTABLES} ${SOLIBS} ${CMAKE_CURRENT_SOURCE_DIR}/imggen.rb
+                DEPENDS ${KERNEL} ${EXECUTABLES} ${SOLIBS} ${CMAKE_CURRENT_SOURCE_DIR}/imggen.rb ${MACHINE_CUSTOM_DTBS}
                 COMMAND ${CMAKE_COMMAND} -E env "PATH=\"${RELOCATED_HOST_DIR}/bin:${RELOCATED_HOST_DIR}/sbin:$ENV{PATH}\"" ${cmd} -t fit
                 COMMAND touch ${CMAKE_CURRENT_SOURCE_DIR}/imggen.rb
             )
@@ -198,7 +204,7 @@ macro(IMG_TARGET)
             # When building ext4 image, also build a fit as we need this for ramloading
             add_custom_command(
                 OUTPUT ${A_NAME}.itb
-                DEPENDS ${KERNEL} ${EXECUTABLES} ${SOLIBS} ${CMAKE_CURRENT_SOURCE_DIR}/imggen.rb
+                DEPENDS ${KERNEL} ${EXECUTABLES} ${SOLIBS} ${CMAKE_CURRENT_SOURCE_DIR}/imggen.rb ${MACHINE_CUSTOM_DTBS}
                 COMMAND ${CMAKE_COMMAND} -E env "PATH=\"${RELOCATED_HOST_DIR}/bin:${RELOCATED_HOST_DIR}/sbin:$ENV{PATH}\"" ${cmd} -t fit
                 COMMAND touch ${CMAKE_CURRENT_SOURCE_DIR}/imggen.rb
             )
@@ -206,7 +212,7 @@ macro(IMG_TARGET)
 
             add_custom_command(
                 OUTPUT ${A_NAME}.ext4.gz ${A_NAME}.ubifs
-                DEPENDS ${KERNEL} ${EXECUTABLES} ${SOLIBS} ${CMAKE_CURRENT_SOURCE_DIR}/imggen.rb
+                DEPENDS ${KERNEL} ${EXECUTABLES} ${SOLIBS} ${CMAKE_CURRENT_SOURCE_DIR}/imggen.rb ${MACHINE_CUSTOM_DTBS}
                 COMMAND ${CMAKE_COMMAND} -E env "PATH=\"${RELOCATED_HOST_DIR}/bin:${RELOCATED_HOST_DIR}/sbin:$ENV{PATH}\"" ${cmd} -t ext4
                 COMMAND touch ${CMAKE_CURRENT_SOURCE_DIR}/imggen.rb
             )
@@ -224,6 +230,42 @@ macro(IMG_TARGET)
         endif()
     endif()
 endmacro()
+
+# Custom device trees
+#
+# Board device trees that MESA maintains itself live in custom_device_tree/ and
+# are compiled from source, because the MESA build has no .dts -> .dtb rule
+# (unlike webstax's build/custom_device_tree). imggen.rb picks the .dtb up from
+# the same directory, see the "pcb135" entry in the fireant machine.
+#
+# Only the machines that actually reference them depend on this, so other
+# targets keep building without a kernel source tree.
+set(CUSTOM_DTB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/custom_device_tree)
+file(GLOB CUSTOM_DTS_SRC CONFIGURE_DEPENDS ${CUSTOM_DTB_DIR}/*.dts)
+set(CUSTOM_DTBS)
+
+# imggen.rb looks up custom .dtb from custom_device_tree, so only the machines
+# that actually reference one have to wait for it.
+set(CUSTOM_DTB_MACHINES fireant)
+
+# The custom sources are SparX-5 device trees, they are only built for the
+# arm64 BSP (build_custom_dtb.sh resolves arch/arm64/boot/dts/microchip).
+if (CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64" AND CUSTOM_DTS_SRC)
+    foreach (DTS ${CUSTOM_DTS_SRC})
+        get_filename_component(DTS_NAME ${DTS} NAME_WE)
+        list(APPEND CUSTOM_DTBS ${CUSTOM_DTB_DIR}/${DTS_NAME}.dtb)
+    endforeach ()
+
+    add_custom_command(
+        OUTPUT ${CUSTOM_DTBS}
+        DEPENDS ${CUSTOM_DTS_SRC} ${CUSTOM_DTB_DIR}/build_custom_dtb.sh
+        COMMAND ${CUSTOM_DTB_DIR}/build_custom_dtb.sh
+                -b ${RELOCATED_HOST_DIR}/../../../../ -o ${CUSTOM_DTB_DIR}
+        COMMENT "Building MESA custom device trees"
+        VERBATIM
+    )
+    add_custom_target(mesa_custom_dtbs DEPENDS ${CUSTOM_DTBS})
+endif ()
 
 APP_TARGET(NAME app_vsc7410            MESA vsc7410            MEBA meba_servalt)
 APP_TARGET(NAME app_vsc7415            MESA vsc7415            MEBA meba_servalt)

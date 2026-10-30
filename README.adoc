@@ -11,6 +11,126 @@ License information, see LICENSE.
 To generate mesa-doc.html (only relevant in non-released version) go to
 `./mesa/docs/scripts` and run `dg.rb`.
 
+== Build the ARM64 VSC7558TSN demo
+
+The commands below were verified with this MESA tree and BSP 2026.03 on a
+Linux x86-64 build host. Build in a Linux environment (for example, an
+OrbStack VM); the BSP CMake, compiler, and host tools are Linux/x86-64
+binaries.
+
+=== Prerequisites
+
+Set the BSP and toolchain directories. Adjust `BSP` if a different BSP
+release is installed:
+
+[source,sh]
+----
+BSP=/opt/mchp/mchp-brsdk-arm64-2026.03
+TC=$BSP/arm64-armv8_a-linux-gnu/xstax/release/x86_64-linux
+CMAKE=$TC/bin/cmake
+----
+
+`imggen.rb` requires the Ruby gem `parslet`:
+
+[source,sh]
+----
+gem list -i parslet >/dev/null 2>&1 ||
+    gem install parslet --user-install --no-document
+----
+
+=== Clean configure and build
+
+Run these commands from the MESA source root. The `arm64` directory is the
+CMake build directory, not the source's architecture name.
+
+[source,sh]
+----
+rm -rf arm64
+
+"$CMAKE" -S . -B arm64 \
+    -DCMAKE_TOOLCHAIN_FILE="$TC/share/buildroot/toolchainfile.cmake" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -Dapp_vsc7558TSN=ON \
+    -DIMG_arm64_vsc7558TSN_ext4=ON
+
+"$CMAKE" --build arm64 \
+    --target arm64_vsc7558TSN_itb \
+    -j"$(nproc)"
+----
+
+The FIT image and its inputs are written under `arm64/mesa/demo`:
+
+[source,text]
+----
+arm64/mesa/demo/arm64_vsc7558TSN.itb
+arm64/mesa/demo/arm64_vsc7558TSN.its
+arm64/mesa/demo/arm64_vsc7558TSN.squashfs
+----
+
+To build the eMMC/ext4 image as well, build the ext4 target. This also
+generates the FIT image:
+
+[source,sh]
+----
+"$CMAKE" --build arm64 --target arm64_vsc7558TSN_ext4 -j"$(nproc)"
+----
+
+=== Custom board device tree
+
+Board device trees maintained by MESA are under
+`mesa/demo/custom_device_tree`. For the `fireant` machine, CMake compiles all
+`*.dts` files in that directory and makes the FIT and ext4 images depend on
+the resulting `.dtb`. No manual DTB build is required for a normal image
+build.
+
+The custom DTB can also be built separately:
+
+[source,sh]
+----
+./mesa/demo/custom_device_tree/build_custom_dtb.sh --bsp "$BSP"
+----
+
+This produces `mesa/demo/custom_device_tree/sparx5_appl_pcb135_aiu.dtb`. The
+equivalent CMake target is:
+
+[source,sh]
+----
+"$CMAKE" --build arm64 --target mesa_custom_dtbs -j"$(nproc)"
+----
+
+The AIU U-Boot selects the FIT configuration named `pcb135`; that
+configuration uses `sparx5_appl_pcb135_aiu.dtb`. The stock BSP PCB135 device
+tree remains available as the `pcb135_ref` configuration. The default
+configuration shown by `dumpimage` is `pcb125`, but U-Boot's
+`bootm ${loadaddr}#${pcb}` selects `pcb135` at boot time. Do not change the
+U-Boot `pcb` environment variable for this board.
+
+=== Verify the FIT image
+
+List the FIT contents and calculate the image checksum:
+
+[source,sh]
+----
+"$TC/bin/dumpimage" -l arm64/mesa/demo/arm64_vsc7558TSN.itb
+sha256sum arm64/mesa/demo/arm64_vsc7558TSN.itb
+----
+
+Confirm that the `pcb135` configuration references `fdt_pcb135`. To verify
+that the FDT embedded in the FIT is the newly built custom DTB, extract it
+and compare it. The image number below matches the current FIT layout; use
+the `fdt_pcb135` image number reported by `dumpimage -l` if the layout
+changes:
+
+[source,sh]
+----
+"$TC/bin/dumpimage" -T flat_dt -p 5 \
+    -o /tmp/fdt_pcb135.dtb \
+    arm64/mesa/demo/arm64_vsc7558TSN.itb
+
+cmp /tmp/fdt_pcb135.dtb \
+    mesa/demo/custom_device_tree/sparx5_appl_pcb135_aiu.dtb
+----
+
 == Terminology
 
 Microchip is aware that some terminology used in this project is antiquated and

@@ -15,6 +15,7 @@
 #define STATUSLED_G_GPIO      12
 #define STATUSLED_R_GPIO      13
 #define AQR_RESET             19
+#define AIU_PHY_RESET_GPIO    19
 #define PHY_ID_GPY241         0xDC00
 #define INDY_COMA_GPIO        16
 #define VTSS_TS_IO_ARRAY_SIZE 4
@@ -208,6 +209,42 @@ static void fa_gpy241_detect(meba_inst_t inst)
             board->gpy241_usxgmii_mode = FALSE;
         }
     }
+}
+
+/*
+ * Galaxy Space AIU hardware probe.
+ *
+ * The AIU U-Boot hard-codes pcb=pcb135 and selects the FIT configuration named
+ * "pcb135", so a board booted with a plain PCB135 device tree silently falls
+ * back to the 57-port reference profile. The AIU is the only PCB135 variant
+ * that carries LAN8870 1000BASE-T1 PHYs on MIIM1 addresses 1-4, and it has no
+ * Elise PHY on MIIM0 addresses 0-1.
+ *
+ * Both buses must be muxed out before this is called.
+ */
+#define AIU_LAN8870_ID 0xC1F2
+static mesa_bool_t fa_aiu_hw_detect(meba_inst_t inst)
+{
+    u16 id = 0, id2 = 0, t1 = 0;
+    int addr;
+
+    /* Elise on MIIM0 means a plain PCB135 revision 1-2. */
+    mebaux_miim_rd(inst, &rawio, 0, 0, 0x3, &id);
+    mebaux_miim_rd(inst, &rawio, 0, 1, 0x3, &id2);
+    if (id == 0x0670 || id2 == 0x0670) {
+        return FALSE;
+    }
+
+    /* All four main-board LAN8870 must answer on MIIM1 addresses 1-4. */
+    for (addr = 1; addr <= 4; addr++) {
+        t1 = 0;
+        mebaux_miim_rd(inst, &rawio, 1, addr, 0x3, &t1);
+        if (t1 != AIU_LAN8870_ID) {
+            return FALSE;
+        }
+    }
+
+    return TRUE;
 }
 
 #define AIU_PORT_COUNT 33
@@ -820,6 +857,27 @@ static void fa_aiu_board_init(meba_inst_t inst)
     (void)mesa_gpio_mode_set(NULL, 0, 52, MESA_GPIO_ALT_1);
     (void)mesa_gpio_mode_set(NULL, 0, 53, MESA_GPIO_ALT_1);
 
+    /*
+     * GPIO19 resets all LAN8814, LAN8870 and VSC8211 devices together.
+     * Preload the low level before enabling the output, then observe the
+     * LAN8870 minimum reset pulse width of 4 ms.
+     */
+    (void)mesa_gpio_write(NULL, 0, AIU_PHY_RESET_GPIO, false);
+    (void)mesa_gpio_mode_set(NULL, 0, AIU_PHY_RESET_GPIO, MESA_GPIO_OUT);
+    (void)mesa_gpio_write(NULL, 0, AIU_PHY_RESET_GPIO, false);
+    VTSS_MSLEEP(10);
+    (void)mesa_gpio_write(NULL, 0, AIU_PHY_RESET_GPIO, true);
+    /* VSC8211 SMI access needs up to 20 ms after reset. */
+    VTSS_MSLEEP(20);
+
+    /*
+     * Keep both LAN8814 devices out of COMA mode. GPIO16 is shared by both
+     * COMA_MODE pins, so it cannot be toggled per PHY.
+     */
+    (void)mesa_gpio_write(NULL, 0, INDY_COMA_GPIO, false);
+    (void)mesa_gpio_mode_set(NULL, 0, INDY_COMA_GPIO, MESA_GPIO_OUT);
+    (void)mesa_gpio_write(NULL, 0, INDY_COMA_GPIO, false);
+
     /* Serial LED engine 1 drives the four 10G optical port LEDs. */
     (void)mesa_gpio_mode_set(NULL, 0, 4, MESA_GPIO_ALT_0); // SLED1_CLK
     (void)mesa_gpio_mode_set(NULL, 0, 5, MESA_GPIO_ALT_0); // SLED1_DO
@@ -861,8 +919,6 @@ static void fa_aiu_board_init(meba_inst_t inst)
     (void)mesa_gpio_direction_set(NULL, 0, STATUSLED_G_GPIO, true);
     (void)mesa_gpio_direction_set(NULL, 0, STATUSLED_R_GPIO, true);
     (void)inst->api.meba_status_led_set(inst, MEBA_LED_TYPE_FRONT, MEBA_LED_COLOR_RED);
-
-    /* PHY resets are sequenced by the MCU/clock circuit; do not toggle GPIO19. */
 }
 
 static void fa_pcb134_board_init(meba_inst_t inst)
@@ -1408,8 +1464,9 @@ static mesa_rc fa_status_led_set(meba_inst_t inst, meba_led_type_t type, meba_le
             rc = mesa_gpio_write(NULL, 0, STATUSLED_G_GPIO, false);
             break;
         case MEBA_LED_COLOR_YELLOW:
-            (void)mesa_gpio_write(NULL, 0, STATUSLED_R_GPIO, true);
-            rc = mesa_gpio_write(NULL, 0, STATUSLED_G_GPIO, true);
+            /* The red/green LEDs are antiparallel; equal drive levels are off. */
+            (void)mesa_gpio_write(NULL, 0, STATUSLED_R_GPIO, false);
+            rc = mesa_gpio_write(NULL, 0, STATUSLED_G_GPIO, false);
             break;
         default: rc = MESA_RC_ERROR;
         }
@@ -2178,6 +2235,19 @@ static mesa_rc fa_reset(meba_inst_t inst, meba_reset_point_t reset)
         inst->phy_devices = (mepa_device_t **)&board->phy_devices;
         inst->phy_device_cnt = board->port_cnt;
         meba_phy_driver_init(inst);
+        /*
+         * The PHYs are out of reset now, so this is the reliable place to
+         * tell an AIU board running the generic PCB135 profile apart. The
+         * port map is already fixed at this point; report the mismatch so it
+         * cannot be mistaken for a cabling problem.
+         */
+        if (board->type == BOARD_TYPE_SPARX5_PCB135 && !board->aiu &&
+            fa_aiu_hw_detect(inst)) {
+            T_E(inst, "AIU hardware detected while running the %d-port PCB135 "
+                      "profile; set pcb_var=33 or boot the AIU device tree and "
+                      "restart",
+                board->port_cnt);
+        }
         break;
     }
     T_D(inst, "Called - %d - Done", reset);
@@ -2705,6 +2775,25 @@ meba_inst_t meba_initialize(size_t callouts_size, const meba_board_interface_t *
         }
         for (i = 52; i < 54; i++) {
             mebaux_gpio_mode_set(inst, &rawio, i, MESA_GPIO_ALT_1);
+        }
+        /*
+         * Without the AIU device tree or pcb_var=33 the port count falls back
+         * to the 57-port reference profile. Recognise the AIU hardware and
+         * switch to its 33-port table instead of driving ports that are not
+         * wired on this board.
+         */
+        if (!board->aiu && board->port_cnt == 57 && fa_aiu_hw_detect(inst)) {
+            T_W(inst, "AIU hardware detected but no AIU profile was selected; "
+                      "using the 33-port AIU table (set pcb_var=33 or boot the "
+                      "AIU device tree to select it explicitly)");
+            board->aiu = TRUE;
+            board->port_cnt = AIU_PORT_COUNT;
+            board->port_cfg = VTSS_BOARD_CONF_AIU_33;
+            strncpy(inst->props.name, "AIU", sizeof(inst->props.name));
+            if (!fa_aiu_port_table_valid(inst)) {
+                goto error_out;
+            }
+            break;
         }
         // Detect gpy241 / PCB135v4 board
         fa_gpy241_detect(inst);

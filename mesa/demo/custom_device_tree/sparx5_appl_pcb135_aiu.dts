@@ -1,0 +1,164 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2026 Microchip Technology Inc. and its subsidiaries.
+ *
+ * SparX-5 PCB135 based Galaxy Space AIU board.
+ *
+ * This is an application (MESA/MEBA) device tree in the same spirit as
+ * sparx5_appl_pcb135.dts: the in-kernel sparx5-switch driver stays disabled and
+ * the switch is driven from user space through the UIO interrupt mux (uio0)
+ * and the ifh0 register window. Enabling &switch here would run the native
+ * sparx5-switch probe against the AIU port layout and is known to fault in the
+ * GIC IRQ path - do not do it.
+ *
+ * The deltas against sparx5_appl_pcb135.dts are the PCB135 peripherals that are
+ * not populated on the AIU board:
+ *
+ *   - no SPI NAND : the AIU boots from the SPI NOR on CS0 only, so
+ *                   sparx5_appl_nand.dtsi is not included and the CS14
+ *                   spi-nand probe failure ("probe with driver spi-nand failed
+ *                   with error -110") disappears
+ *   - no CPLD/SyncE : PCB135 SPI CS1 (cpld), CS2 (synce_dpll) and CS3
+ *                   (synce_builtin) are absent
+ *   - no SFP I2C mux : the AIU SFP cages have no accessible EEPROM, so the
+ *                   PCB135 i2c-mux, its four SFP cages and the aliases
+ *                   i2c152..i2c155 (GPIO35/36/50/51) are dropped
+ *   - no MDIO/PHY children : MEBA drives LAN8814 / LAN8870 / VSC8211 from its
+ *                   own port table, see aiu_port_cfg[] in meba/src/sparx5/meba.c
+ *   - status LEDs on GPIO12/GPIO13 instead of the PCB135 SFP cage LEDs on
+ *                   SGPIO1 ports 28-31
+ *
+ * Board identity is carried in the "meba" node so MEBA finds the AIU port table
+ * without depending on the U-Boot environment.
+ *
+ * Still inherited from PCB135 and worth confirming on hardware:
+ *
+ *   - gpio pin muxing of SI/SI2, SGPIO ranges and the uart/i2c pin groups
+ *   - SGPIO0/SGPIO1/SGPIO2 are left enabled exactly as in the stock APPL tree.
+ *     MEBA reconfigures the SGPIO blocks from user space afterwards (SLED1 on
+ *     SGPIO1 ports 23-26, the PHY interrupt chain on SGPIO2 ports 0-2); if a
+ *     kernel SGPIO user ever appears, disable the block here instead.
+ */
+
+/dts-v1/;
+#include "sparx5_appl_pcb135_board.dtsi"
+
+/* PCB135 SFP cages and their I2C mux are not present on the AIU board. */
+/delete-node/ &i2c0_imux;
+/delete-node/ &sfp_eth60;
+/delete-node/ &sfp_eth61;
+/delete-node/ &sfp_eth62;
+/delete-node/ &sfp_eth63;
+
+/ {
+	model = "Sparx5 PCB135 Galaxy Space Yinhe AIU Board";
+	compatible = "microchip,sparx5-pcb135", "microchip,sparx5";
+
+	memory@0 {
+		device_type = "memory";
+		reg = <0x00000000 0x00000000 0x40000000>;
+	};
+
+	/*
+	 * The PCB135 "leds" node drives the four SFP cage LEDs over SGPIO1 ports
+	 * 28-31. Those SGPIO ports are unused on the AIU board, which has plain
+	 * status LEDs on GPIO12/GPIO13 instead - the same wiring as the AIU U-Boot
+	 * device tree (arch/arm/dts/mscc,sparx5_pcb.dtsi). MEBA drives the 10G
+	 * optical port LEDs on SGPIO1 ports 23-26 and GPIO12/13 from
+	 * fa_aiu_board_init() in meba/src/sparx5/meba.c.
+	 */
+	/delete-node/ leds;
+
+	leds {
+		compatible = "gpio-leds";
+		status_green {
+			label = "green:status";
+			gpios = <&gpio 12 GPIO_ACTIVE_HIGH>;
+			default-state = "on";
+		};
+		status_red {
+			label = "red:status";
+			gpios = <&gpio 13 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
+		};
+	};
+
+	/*
+	 * PCB135 uses GPIO37 for its board-level restart. On AIU, GPIO37 is
+	 * LANA_Optical_nReset and must not be driven by the kernel restart
+	 * handler. Keep only the SoC reset controller from the APPL tree.
+	 */
+	/delete-node/ gpio-restart;
+
+	/*
+	 * Board properties for MEBA.
+	 *
+	 * board_dtree_get() in mesa/demo/main.c reads /proc/device-tree/meba/<tag>
+	 * and gives it priority over the U-Boot environment, so this node alone is
+	 * enough to bring up the AIU port table:
+	 *
+	 *   board    -> meba_state_alloc() in meba/src/meba_aux.h sets the board
+	 *               name; sparx5_initialize() overwrites it with "AIU" once the
+	 *               33-port configuration is matched
+	 *   pcb      -> PCB135 MEBA entry point; the value is matched with strstr()
+	 *               and must contain "135"
+	 *   pcb_var  -> 33 == AIU_PORT_COUNT, selects VTSS_BOARD_CONF_AIU_33
+	 *   target   -> MESA_TARGET_7558TSN
+	 *
+	 * Keep these in sync with the U-Boot environment, which should carry the
+	 * same values (pcb=pcb135, pcb_var=33) for the case where the device tree is
+	 * replaced by a stock one.
+	 */
+	meba {
+		board   = "AIU";
+		pcb     = "135";
+		pcb_var = "33";
+		target  = "0x47558";	/* MESA_TARGET_7558TSN */
+	};
+
+	aliases {
+		/delete-property/ i2c152;
+		/delete-property/ i2c153;
+		/delete-property/ i2c154;
+		/delete-property/ i2c155;
+	};
+};
+
+&gpio {
+	/delete-node/ cpld-pins;
+	/delete-node/ synce-pins;
+	/delete-node/ synce-builtin-pins;
+};
+
+&spi0 {
+	/delete-node/ spi@1;
+	/delete-node/ spi@2;
+	/delete-node/ spi@3;
+};
+
+/*
+ * GPIO19 is LANA_nPHYRESET and resets every LAN8814, LAN8870 and the VSC8211
+ * through LANA_nPHYRESET_1G. GPIO16 is LANA_COMA and drives COMA_MODE on both
+ * LAN8814 devices. Both are shared board-level controls and are initialized by
+ * fa_aiu_board_init() in meba/src/sparx5/meba.c.
+ *
+ * GPIO37 is LANA_Optical_nReset and GPIO38 is LANA_nSYSRESETout, which is
+ * connected to the board reset supervisor. Neither is owned by this device
+ * tree.
+ *
+ * spi0 keeps only flash@0 (mx66l1g45g on CS0, the boot NOR).
+ *
+ * The MDIO controllers stay disabled; enable them only if kernel PHY drivers
+ * are wanted instead of the MEBA PHY drivers:
+ *
+ *   &mdio0 { status = "okay";			LAN8814 QSGMII, MIIM0
+ *       ethernet-phy@4 ... @7;			ports 4-7 (PHY board)
+ *       ethernet-phy@12 ... @15;			ports 0-3 (main board)
+ *   };
+ *   &mdio1 { status = "okay";			LAN8870 SGMII, MIIM1
+ *       ethernet-phy@1 ... @12;			ports 8-19
+ *   };
+ *   &mdio3 { status = "okay";			VSC8211 SGMII, MIIM3 addr 28
+ *       ethernet-phy@28;				port 20 (test RJ45)
+ *   };
+ */

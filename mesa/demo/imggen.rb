@@ -63,6 +63,12 @@ $bsp = File.expand_path $o[:bsp]
 #puts "BSP-TOP: #{$bsp}"
 #puts "MESA-TOP: #{$p_mesa}"
 
+# Board device trees that are maintained in MESA rather than in the BSP. Their
+# sources live in mesa/demo/custom_device_tree and are compiled into .dtb by
+# mesa/demo/custom_device_tree/build_custom_dtb.sh (the MESA build has no
+# .dts -> .dtb rule, unlike webstax).
+$p_custom_dtb = "#{$p_mesa}/mesa/demo/custom_device_tree"
+
 $machines = {
     "ls1046a" => {
         :arch => "arm64",
@@ -160,7 +166,14 @@ $machines = {
             { :name => "pcb125",        :file => "#{$bsp}/arm64-armv8_a-linux-gnu/xstax/release/sparx5_pcb125.dtb"},
             { :name => "pcb134",        :file => "#{$bsp}/arm64-armv8_a-linux-gnu/xstax/release/sparx5_appl_pcb134.dtb"},
             { :name => "pcb134_emmc",   :file => "#{$bsp}/arm64-armv8_a-linux-gnu/xstax/release/sparx5_appl_pcb134_emmc.dtb"},
-            { :name => "pcb135",        :file => "#{$bsp}/arm64-armv8_a-linux-gnu/xstax/release/sparx5_appl_pcb135.dtb"},
+            # The AIU U-Boot hard-codes pcb=pcb135 (board/mscc/sparx5/sparx5.c,
+            # BOARD_TYPE_PCB135_YINHE) and ramboot does "bootm ${loadaddr}#${pcb}",
+            # so the FIT configuration named "pcb135" must carry the AIU device
+            # tree. The .dtb is built from custom_device_tree by
+            # build_custom_dtb.sh, it does not come from the BSP.
+            { :name => "pcb135",        :file => "#{$p_custom_dtb}/sparx5_appl_pcb135_aiu.dtb"},
+            # Stock PCB135 reference board tree, kept for bring-up work.
+            { :name => "pcb135_ref",    :file => "#{$bsp}/arm64-armv8_a-linux-gnu/xstax/release/sparx5_appl_pcb135.dtb"},
             { :name => "pcb135_emmc",   :file => "#{$bsp}/arm64-armv8_a-linux-gnu/xstax/release/sparx5_appl_pcb135_emmc.dtb"},
             { :name => "ls1046_pcb134", :file => "#{$bsp}/arm64-armv8_a-linux-gnu/xstax/release/ls1046_pcb134.dtb"},
         ],

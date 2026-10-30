@@ -493,6 +493,13 @@ static mesa_rc board_conf_get(const char *tag, char *buf, size_t bufsize, size_t
         type = REF_BOARD_PCB;
         if (REF_BOARD_PORT_COUNT <= 0) {
             REF_BOARD_PORT_COUNT = get_fa_port_cnt_default(target, type);
+            if (type == 135) {
+                T_E("pcb_var was not found (device tree meba/pcb_var, "
+                    "environment or uboot env); falling back to the %d-port "
+                    "PCB135 profile. The Galaxy Space AIU board needs "
+                    "pcb_var=33.",
+                    REF_BOARD_PORT_COUNT);
+            }
         }
         board_port_cnt = REF_BOARD_PORT_COUNT;
         get_fa_board_name(board_port_cnt, sparxi, type, name);

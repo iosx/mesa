@@ -1,0 +1,3 @@
+# Built by build_custom_dtb.sh / the mesa_custom_dtbs CMake target
+*.dtb
+*.dts.tmp
