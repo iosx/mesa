@@ -242,6 +242,11 @@ endmacro()
 # targets keep building without a kernel source tree.
 set(CUSTOM_DTB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/custom_device_tree)
 file(GLOB CUSTOM_DTS_SRC CONFIGURE_DEPENDS ${CUSTOM_DTB_DIR}/*.dts)
+# The local .dtsi includes are part of the sources: editing e.g.
+# sparx5_pcb135_board.dtsi must rebuild the .dtb, otherwise a stale .dtb is
+# packed into the image. The CONFIGURE_DEPENDS glob also re-runs cmake when an
+# include is added or removed.
+file(GLOB CUSTOM_DTS_INC CONFIGURE_DEPENDS ${CUSTOM_DTB_DIR}/*.dtsi)
 set(CUSTOM_DTBS)
 
 # imggen.rb looks up custom .dtb from custom_device_tree, so only the machines
@@ -258,7 +263,7 @@ if (CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64" AND CUSTOM_DTS_SRC)
 
     add_custom_command(
         OUTPUT ${CUSTOM_DTBS}
-        DEPENDS ${CUSTOM_DTS_SRC} ${CUSTOM_DTB_DIR}/build_custom_dtb.sh
+        DEPENDS ${CUSTOM_DTS_SRC} ${CUSTOM_DTS_INC} ${CUSTOM_DTB_DIR}/build_custom_dtb.sh
         COMMAND ${CUSTOM_DTB_DIR}/build_custom_dtb.sh
                 -b ${RELOCATED_HOST_DIR}/../../../../ -o ${CUSTOM_DTB_DIR}
         COMMENT "Building MESA custom device trees"
