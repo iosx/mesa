@@ -28,8 +28,10 @@
  *   - status LEDs on GPIO12/GPIO13 instead of the PCB135 SFP cage LEDs on
  *                   SGPIO1 ports 28-31
  *
- * Board identity is carried in the "meba" node so MEBA finds the AIU port table
- * without depending on the U-Boot environment.
+ * Board identity comes from the U-Boot environment (pcb=pcb135, pcb_var=33).
+ * Do not add a /meba node here: U-Boot's ft_board_setup() copies the env "pcb"
+ * string into /meba/pcb, and MEBA parses that property with sscanf("%x"), which
+ * fails for values such as "pcb135" and aborts initialization.
  *
  * Still inherited from PCB135 and worth confirming on hardware:
  *
@@ -89,32 +91,6 @@
 	 * handler. Keep only the SoC reset controller from the APPL tree.
 	 */
 	/delete-node/ gpio-restart;
-
-	/*
-	 * Board properties for MEBA.
-	 *
-	 * board_dtree_get() in mesa/demo/main.c reads /proc/device-tree/meba/<tag>
-	 * and gives it priority over the U-Boot environment, so this node alone is
-	 * enough to bring up the AIU port table:
-	 *
-	 *   board    -> meba_state_alloc() in meba/src/meba_aux.h sets the board
-	 *               name; sparx5_initialize() overwrites it with "AIU" once the
-	 *               33-port configuration is matched
-	 *   pcb      -> PCB135 MEBA entry point; the value is matched with strstr()
-	 *               and must contain "135"
-	 *   pcb_var  -> 33 == AIU_PORT_COUNT, selects VTSS_BOARD_CONF_AIU_33
-	 *   target   -> MESA_TARGET_7558TSN
-	 *
-	 * Keep these in sync with the U-Boot environment, which should carry the
-	 * same values (pcb=pcb135, pcb_var=33) for the case where the device tree is
-	 * replaced by a stock one.
-	 */
-	meba {
-		board   = "AIU";
-		pcb     = "135";
-		pcb_var = "33";
-		target  = "0x47558";	/* MESA_TARGET_7558TSN */
-	};
 
 	aliases {
 		/delete-property/ i2c152;

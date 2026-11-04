@@ -61,21 +61,18 @@ same way, because a BSP host bindir has no generic `cc`.
 `sparx5_appl_pcb135_aiu.dts` derives from `sparx5_appl_pcb135.dts` and removes
 the PCB135 peripherals that the AIU board does not have (SPI NAND on CS14,
 CPLD/SyncE on SPI CS1-CS3, the SFP I2C mux and cages, and the MDIO PHY
-children). Board identity is carried in a `meba` node, which MEBA reads from
-`/proc/device-tree/meba/*` in preference to the U-Boot environment:
+children). Board identity deliberately comes from the U-Boot environment
+(`pcb=pcb135`, `pcb_var=33`), not from a `/meba` node.
 
-```
-meba {
-        board   = "AIU";
-        pcb     = "135";
-        pcb_var = "33";
-        target  = "0x47558";
-};
-```
+Do **not** add a `/meba` node to this tree. U-Boot's `ft_board_setup()`
+(`board/mscc/common/fdt_env.c`) overwrites `/meba/pcb` with the `pcb`
+environment string, and MEBA parses that property with `sscanf("%x")`. Values
+such as `pcb135` fail to parse and MEBA aborts with `Could not read pcb type`.
+Without the node, `board_conf_get()` falls back to the U-Boot environment,
+where `int_from_str()` extracts the numeric PCB type from `pcb135`.
 
-Keep `pcb` containing `"135"` (it is matched with `strstr()`) and `pcb_var` at
-`33` (`AIU_PORT_COUNT`) - that pair selects `VTSS_BOARD_CONF_AIU_33` in
-`meba/src/sparx5/meba.c`.
+`pcb_var=33` (`AIU_PORT_COUNT`) plus PCB type 135 selects
+`VTSS_BOARD_CONF_AIU_33` in `meba/src/sparx5/meba.c`.
 
 `&switch` (the native `sparx5-switch` driver) must stay disabled: the AIU is
 driven from user space through `uio0` (interrupt mux) and `ifh0`, exactly like
