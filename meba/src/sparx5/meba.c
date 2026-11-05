@@ -15,7 +15,6 @@
 #define STATUSLED_G_GPIO      12
 #define STATUSLED_R_GPIO      13
 #define AQR_RESET             19
-#define AIU_PHY_RESET_GPIO    19
 #define PHY_ID_GPY241         0xDC00
 #define INDY_COMA_GPIO        16
 #define VTSS_TS_IO_ARRAY_SIZE 4
@@ -318,8 +317,15 @@ static const aiu_port_cfg_t aiu_port_cfg[AIU_PORT_COUNT] = {
     {60, MESA_PORT_INTERFACE_SFI, MESA_BW_25G, MESA_MIIM_CONTROLLER_NONE, 0, AIU_FIXED_25G_FIBER_CAP, 26, MESA_SGPIO_PORTS, 0, 25},
 
     /* Fixed internal MAC-to-MAC links: MCU A/B, FPGA, cross-switch and Thor A/B. */
-    {48, MESA_PORT_INTERFACE_SGMII, MESA_BW_1G,  MESA_MIIM_CONTROLLER_NONE, 0, AIU_FIXED_1G_CU_BP_CAP,  27, MESA_SGPIO_PORTS, 0, 1},
-    {49, MESA_PORT_INTERFACE_SGMII, MESA_BW_1G,  MESA_MIIM_CONTROLLER_NONE, 0, AIU_FIXED_1G_CU_BP_CAP,  28, MESA_SGPIO_PORTS, 0, 1},
+    /*
+     * The MCU links are direct SGMII SerDes links without a PHY. Use the
+     * SERDES (1000BASE-X PCS) interface so MESA takes the link state from the
+     * PCS: MESA_PORT_INTERFACE_SGMII is a MAC-to-PHY type and reports link
+     * down when no PHY driver is attached. At 1G with AN disabled the PCS is
+     * compatible with the MCU's forced-1000M SGMII.
+     */
+    {48, MESA_PORT_INTERFACE_SERDES, MESA_BW_1G, MESA_MIIM_CONTROLLER_NONE, 0, AIU_FIXED_1G_CU_BP_CAP, 27, MESA_SGPIO_PORTS, 0, 1},
+    {49, MESA_PORT_INTERFACE_SERDES, MESA_BW_1G, MESA_MIIM_CONTROLLER_NONE, 0, AIU_FIXED_1G_CU_BP_CAP, 28, MESA_SGPIO_PORTS, 0, 1},
     {54, MESA_PORT_INTERFACE_SFI,   MESA_BW_10G, MESA_MIIM_CONTROLLER_NONE, 0, AIU_FIXED_10G_CU_BP_CAP, 29, MESA_SGPIO_PORTS, 0, 10},
     {61, MESA_PORT_INTERFACE_SFI,   MESA_BW_25G, MESA_MIIM_CONTROLLER_NONE, 0, AIU_FIXED_25G_CU_BP_CAP, 30, MESA_SGPIO_PORTS, 0, 25},
     {62, MESA_PORT_INTERFACE_SFI,   MESA_BW_25G, MESA_MIIM_CONTROLLER_NONE, 0, AIU_FIXED_25G_CU_BP_CAP, 31, MESA_SGPIO_PORTS, 0, 25},
@@ -572,8 +578,6 @@ static void fa_pcb134_init_port(meba_inst_t inst, mesa_port_no_t port_no, meba_p
     }
 }
 
-static void fa_aiu_board_init(meba_inst_t inst);
-
 static void fa_pcb135_init_port(meba_inst_t inst, mesa_port_no_t port_no, meba_port_entry_t *entry)
 {
     meba_board_state_t   *board = INST2BOARD(inst);
@@ -741,11 +745,6 @@ static void fa_pcb135_board_init(meba_inst_t inst)
     uint32_t            port, gpio_no;
     meba_board_state_t *board = INST2BOARD(inst);
 
-    if (board->aiu) {
-        fa_aiu_board_init(inst);
-        return;
-    }
-
     /* Configure GPIOs for MIIM/MDIO bus 0-1, QSGMII ports */
     for (gpio_no = 56; gpio_no < 60; gpio_no++) {
         (void)mesa_gpio_mode_set(NULL, 0, gpio_no, MESA_GPIO_ALT_0);
@@ -757,8 +756,11 @@ static void fa_pcb135_board_init(meba_inst_t inst)
     /* GPIOs for SGPIO Group 1: LEDs for 10/25G ports  */
     (void)mesa_gpio_mode_set(NULL, 0, 4, MESA_GPIO_ALT_0);  // SGPIO Grp 1 / CLK
     (void)mesa_gpio_mode_set(NULL, 0, 5, MESA_GPIO_ALT_0);  // SGPIO Grp 1 / DO
-    (void)mesa_gpio_mode_set(NULL, 0, 12, MESA_GPIO_ALT_0); // SGPIO Grp 1 / DI
-    (void)mesa_gpio_mode_set(NULL, 0, 13, MESA_GPIO_ALT_0); // SGPIO Grp 1 / LD
+    if (!board->aiu) {
+        // AIU uses GPIO12/13 as direct status LED outputs
+        (void)mesa_gpio_mode_set(NULL, 0, 12, MESA_GPIO_ALT_0); // SGPIO Grp 1 / DI
+        (void)mesa_gpio_mode_set(NULL, 0, 13, MESA_GPIO_ALT_0); // SGPIO Grp 1 / LD
+    }
 
     /* GPIOs for SGPIO Group 2: SFP signals for 10/25G ports   */
     (void)mesa_gpio_mode_set(NULL, 0, 30, MESA_GPIO_ALT_0); // SGPIO Grp 2 / Clk
@@ -774,7 +776,11 @@ static void fa_pcb135_board_init(meba_inst_t inst)
         conf.bmode[0] = MESA_SGPIO_BMODE_5;
         conf.bit_count = 2;
 
-        for (port = 24; port < 32; port++) {
+        /* AIU: p23-p26 drive the four 10G port LEDs. */
+        /* PCB135: p24-p31 drive D60-D63 and the p24-p27 function LEDs. */
+        uint32_t port_first = board->aiu ? 23 : 24;
+        uint32_t port_last = board->aiu ? 26 : 31;
+        for (port = port_first; port <= port_last; port++) {
             conf.port_conf[port].enabled = 1;
             conf.port_conf[port].mode[0] = MESA_SGPIO_MODE_ON; // Turn on LEDs while booting
             conf.port_conf[port].mode[1] = MESA_SGPIO_MODE_OFF;
@@ -782,31 +788,43 @@ static void fa_pcb135_board_init(meba_inst_t inst)
         (void)mesa_sgpio_conf_set(NULL, 0, 1, &conf);
     }
 
-    /* SGPIO group 2 controls SFP signals for the 4x25G ports */
+    /* SGPIO group 2 controls SFP signals for the 4x25G ports (PCB135) */
+    /* or the PHY interrupt inputs (AIU) */
     if (mesa_sgpio_conf_get(NULL, 0, 2, &conf) == MESA_RC_OK) {
         conf.bmode[0] = MESA_SGPIO_BMODE_5;
         conf.bit_count = 3;
-        for (port = 28; port < 32; port++) {
-            conf.port_conf[port].enabled = 1;
-            conf.port_conf[port].int_pol_high[0] = true; // LOS interrupt is active high (input)
-            conf.port_conf[port].int_pol_high[2] =
-                true; // TX_FAULT interrupt is active high (input)
-            conf.port_conf[port].mode[0] =
-                MESA_SGPIO_MODE_OFF;                           // TXDisable is enabled through
-                                                               // fa_port_admin_state_set() (output)
-            conf.port_conf[port].mode[1] = MESA_SGPIO_MODE_ON; // Ratesel0 always eanbled (output)
-            conf.port_conf[port].mode[2] = MESA_SGPIO_MODE_ON; // Ratesel1 always eanbled (output)
+        if (board->aiu) {
+            /* P0b1: LAN8814 IRQ, P1b0: main-board LAN8870 IRQ, */
+            /* P2b0: PHY-board LAN8870 IRQ */
+            for (port = 0; port <= 2; port++) {
+                conf.port_conf[port].enabled = true;
+            }
+            conf.port_conf[0].int_pol_high[1] = false;
+            conf.port_conf[1].int_pol_high[0] = false;
+            conf.port_conf[2].int_pol_high[0] = false;
+        } else {
+            for (port = 28; port < 32; port++) {
+                conf.port_conf[port].enabled = 1;
+                conf.port_conf[port].int_pol_high[0] = true; // LOS interrupt is active high (input)
+                conf.port_conf[port].int_pol_high[2] =
+                    true; // TX_FAULT interrupt is active high (input)
+                conf.port_conf[port].mode[0] =
+                    MESA_SGPIO_MODE_OFF; // TXDisable is enabled through
+                                         // fa_port_admin_state_set() (output)
+                conf.port_conf[port].mode[1] = MESA_SGPIO_MODE_ON; // Ratesel0 always enabled (output)
+                conf.port_conf[port].mode[2] = MESA_SGPIO_MODE_ON; // Ratesel1 always enabled (output)
+            }
+            conf.port_conf[0].enabled = true;           // I2C
+            conf.port_conf[16].enabled = true;          // I2C
+            conf.port_conf[17].enabled = true;          // Elise Phy
+            conf.port_conf[18].enabled = true;          // Elise Phy
+            conf.port_conf[17].int_pol_high[0] = false; // INTR for QSGMII Elise Phy 0-1 (8 instances)
+            conf.port_conf[17].int_pol_high[1] = false; // INTR for QSGMII Elise Phy 2-3 (8 instances)
+            conf.port_conf[17].int_pol_high[2] = false; // INTR for QSGMII Elise Phy 4-5 (8 instances)
+            conf.port_conf[18].int_pol_high[0] = false; // INTR for QSGMII Elise Phy 6-7 (8 instances)
+            conf.port_conf[18].int_pol_high[1] = false; // INTR for QSGMII Elise Phy 8-9 (8 instances)
+            conf.port_conf[18].int_pol_high[2] = false; // INTR for QSGMII Elise Phy 10-11 (8 instances)
         }
-        conf.port_conf[0].enabled = true;           // I2C
-        conf.port_conf[16].enabled = true;          // I2C
-        conf.port_conf[17].enabled = true;          // Elise Phy
-        conf.port_conf[18].enabled = true;          // Elise Phy
-        conf.port_conf[17].int_pol_high[0] = false; // INTR for QSGMII Elise Phy 0-1 (8 instances)
-        conf.port_conf[17].int_pol_high[1] = false; // INTR for QSGMII Elise Phy 2-3 (8 instances)
-        conf.port_conf[17].int_pol_high[2] = false; // INTR for QSGMII Elise Phy 4-5 (8 instances)
-        conf.port_conf[18].int_pol_high[0] = false; // INTR for QSGMII Elise Phy 6-7 (8 instances)
-        conf.port_conf[18].int_pol_high[1] = false; // INTR for QSGMII Elise Phy 8-9 (8 instances)
-        conf.port_conf[18].int_pol_high[2] = false; // INTR for QSGMII Elise Phy 10-11 (8 instances)
         (void)mesa_sgpio_conf_set(NULL, 0, 2, &conf);
     }
     /* Turn on the Status LED to Red */
@@ -814,12 +832,13 @@ static void fa_pcb135_board_init(meba_inst_t inst)
     mesa_gpio_direction_set(NULL, 0, STATUSLED_R_GPIO, true);
     inst->api.meba_status_led_set(inst, MEBA_LED_TYPE_FRONT, MEBA_LED_COLOR_RED);
 
-    /* Aquantia (or Board) Reset GPIO */
+    /* Aquantia/Indy (PCB135) or LAN8814/LAN8870/VSC8211 (AIU) reset GPIO */
+    (void)mesa_gpio_write(NULL, 0, AQR_RESET, false);
     mesa_gpio_direction_set(NULL, 0, AQR_RESET, true);
 
     (void)mesa_gpio_write(NULL, 0, AQR_RESET, false);
-    VTSS_MSLEEP(1);
-    // Take Aquantia (or Board) Phy out of reset
+    VTSS_MSLEEP(board->aiu ? 10 : 1); // LAN8870 needs at least 4 ms
+    // Take the Phy out of reset
     (void)mesa_gpio_write(NULL, 0, AQR_RESET, true);
 
     if (board->gpy241_present) {
@@ -833,8 +852,18 @@ static void fa_pcb135_board_init(meba_inst_t inst)
         // Delay for gpy241 phy coming out of reset
         VTSS_MSLEEP(1000);
     } else {
-        // Delay for AQR phy coming out of reset
+        // Delay for AQR/LAN8814/LAN8870/VSC8211 coming out of reset
         VTSS_MSLEEP(50);
+    }
+
+    if (board->aiu) {
+        /*
+         * Keep both LAN8814 devices out of COMA mode. GPIO16 is shared by
+         * both COMA_MODE pins, so it cannot be toggled per PHY.
+         */
+        (void)mesa_gpio_write(NULL, 0, INDY_COMA_GPIO, false);
+        (void)mesa_gpio_mode_set(NULL, 0, INDY_COMA_GPIO, MESA_GPIO_OUT);
+        (void)mesa_gpio_write(NULL, 0, INDY_COMA_GPIO, false);
     }
 
     /* We must increase the drive strength for MIIM/MDIO bus 3  */
@@ -842,83 +871,6 @@ static void fa_pcb135_board_init(meba_inst_t inst)
     /* Currently unsupported in the API therefore direct write  */
     mesa_reg_write(NULL, 0, 0x4142038, 0xE);
     mesa_reg_write(NULL, 0, 0x4142039, 0xE);
-}
-
-static void fa_aiu_board_init(meba_inst_t inst)
-{
-    mesa_sgpio_conf_t conf;
-
-    /* MIIM0/1 serve the two LAN8814 and twelve LAN8870 PHYs. */
-    for (uint32_t gpio_no = 56; gpio_no < 60; gpio_no++) {
-        (void)mesa_gpio_mode_set(NULL, 0, gpio_no, MESA_GPIO_ALT_0);
-    }
-
-    /* MIIM3 serves the VSC8211 management/test port. */
-    (void)mesa_gpio_mode_set(NULL, 0, 52, MESA_GPIO_ALT_1);
-    (void)mesa_gpio_mode_set(NULL, 0, 53, MESA_GPIO_ALT_1);
-
-    /*
-     * GPIO19 resets all LAN8814, LAN8870 and VSC8211 devices together.
-     * Preload the low level before enabling the output, then observe the
-     * LAN8870 minimum reset pulse width of 4 ms.
-     */
-    (void)mesa_gpio_write(NULL, 0, AIU_PHY_RESET_GPIO, false);
-    (void)mesa_gpio_mode_set(NULL, 0, AIU_PHY_RESET_GPIO, MESA_GPIO_OUT);
-    (void)mesa_gpio_write(NULL, 0, AIU_PHY_RESET_GPIO, false);
-    VTSS_MSLEEP(10);
-    (void)mesa_gpio_write(NULL, 0, AIU_PHY_RESET_GPIO, true);
-    /* VSC8211 SMI access needs up to 20 ms after reset. */
-    VTSS_MSLEEP(20);
-
-    /*
-     * Keep both LAN8814 devices out of COMA mode. GPIO16 is shared by both
-     * COMA_MODE pins, so it cannot be toggled per PHY.
-     */
-    (void)mesa_gpio_write(NULL, 0, INDY_COMA_GPIO, false);
-    (void)mesa_gpio_mode_set(NULL, 0, INDY_COMA_GPIO, MESA_GPIO_OUT);
-    (void)mesa_gpio_write(NULL, 0, INDY_COMA_GPIO, false);
-
-    /* Serial LED engine 1 drives the four 10G optical port LEDs. */
-    (void)mesa_gpio_mode_set(NULL, 0, 4, MESA_GPIO_ALT_0); // SLED1_CLK
-    (void)mesa_gpio_mode_set(NULL, 0, 5, MESA_GPIO_ALT_0); // SLED1_DO
-    if (mesa_sgpio_conf_get(NULL, 0, 1, &conf) == MESA_RC_OK) {
-        conf.bmode[0] = MESA_SGPIO_BMODE_5;
-        conf.bit_count = 2;
-        for (uint32_t port = 23; port <= 26; port++) {
-            conf.port_conf[port].enabled = true;
-            conf.port_conf[port].mode[0] = MESA_SGPIO_MODE_ON;
-            conf.port_conf[port].mode[1] = MESA_SGPIO_MODE_OFF;
-        }
-        (void)mesa_sgpio_conf_set(NULL, 0, 1, &conf);
-    }
-
-    /*
-     * SGPIO2 input chain:
-     *   P0b1 - aggregated interrupt from both LAN8814 devices
-     *   P1b0 - interrupt from the four main-board LAN8870 devices
-     *   P2b0 - interrupt from the eight PHY-board LAN8870 devices
-     */
-    (void)mesa_gpio_mode_set(NULL, 0, 30, MESA_GPIO_ALT_0); // SGPIO2_CLK
-    (void)mesa_gpio_mode_set(NULL, 0, 31, MESA_GPIO_ALT_0); // SGPIO2_LD
-    (void)mesa_gpio_mode_set(NULL, 0, 32, MESA_GPIO_ALT_0); // SGPIO2_DO
-    (void)mesa_gpio_mode_set(NULL, 0, 33, MESA_GPIO_ALT_0); // SGPIO2_DI
-    if (mesa_sgpio_conf_get(NULL, 0, 2, &conf) == MESA_RC_OK) {
-        conf.bit_count = 3;
-        conf.port_conf[0].enabled = true;
-        conf.port_conf[1].enabled = true;
-        conf.port_conf[2].enabled = true;
-        conf.port_conf[0].int_pol_high[1] = false;
-        conf.port_conf[1].int_pol_high[0] = false;
-        conf.port_conf[2].int_pol_high[0] = false;
-        (void)mesa_sgpio_conf_set(NULL, 0, 2, &conf);
-    }
-
-    /* GPIO12/13 are direct board status LED outputs on AIU. */
-    (void)mesa_gpio_mode_set(NULL, 0, STATUSLED_G_GPIO, MESA_GPIO_OUT);
-    (void)mesa_gpio_mode_set(NULL, 0, STATUSLED_R_GPIO, MESA_GPIO_OUT);
-    (void)mesa_gpio_direction_set(NULL, 0, STATUSLED_G_GPIO, true);
-    (void)mesa_gpio_direction_set(NULL, 0, STATUSLED_R_GPIO, true);
-    (void)inst->api.meba_status_led_set(inst, MEBA_LED_TYPE_FRONT, MEBA_LED_COLOR_RED);
 }
 
 static void fa_pcb134_board_init(meba_inst_t inst)

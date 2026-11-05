@@ -67,7 +67,7 @@
 	 * status LEDs on GPIO12/GPIO13 instead - the same wiring as the AIU U-Boot
 	 * device tree (arch/arm/dts/mscc,sparx5_pcb.dtsi). MEBA drives the 10G
 	 * optical port LEDs on SGPIO1 ports 23-26 and GPIO12/13 from
-	 * fa_aiu_board_init() in meba/src/sparx5/meba.c.
+	 * fa_pcb135_board_init() in meba/src/sparx5/meba.c.
 	 */
 	/delete-node/ leds;
 
@@ -116,7 +116,7 @@
  * GPIO19 is LANA_nPHYRESET and resets every LAN8814, LAN8870 and the VSC8211
  * through LANA_nPHYRESET_1G. GPIO16 is LANA_COMA and drives COMA_MODE on both
  * LAN8814 devices. Both are shared board-level controls and are initialized by
- * fa_aiu_board_init() in meba/src/sparx5/meba.c.
+ * fa_pcb135_board_init() in meba/src/sparx5/meba.c.
  *
  * GPIO37 is LANA_Optical_nReset and GPIO38 is LANA_nSYSRESETout, which is
  * connected to the board reset supervisor. Neither is owned by this device

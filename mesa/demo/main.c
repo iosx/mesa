@@ -12,7 +12,9 @@
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/select.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
+#include <time.h>
 
 #include "microchip/ethernet/switch/api.h"
 #include "microchip/ethernet/board/api.h"
@@ -20,6 +22,7 @@
 #include "trace.h"
 #include "cli.h"
 #include "ipc.h"
+#include "port.h"
 #include "vtss_os.h"
 
 #define ARRSZ(_x_) (sizeof(_x_) / sizeof((_x_)[0]))
@@ -741,12 +744,24 @@ static void cli_cmd_board_dump(cli_req_t *req)
     uint16_t meba_cnt = MEBA_WRAP(meba_capability, appl_init.board_inst, MEBA_CAP_BOARD_PORT_COUNT);
     mesa_bool_t cap_sensor =
         MEBA_WRAP(meba_capability, appl_init.board_inst, MEBA_CAP_TEMP_SENSORS);
+    struct stat st;
+    char        image_time[32] = "unknown";
+    mesa_port_no_t iport;
+
+    if (stat("/proc/self/exe", &st) == 0) {
+        struct tm tm;
+        if (gmtime_r(&st.st_mtime, &tm) != NULL) {
+            (void)strftime(image_time, sizeof(image_time), "%Y-%m-%d %H:%M:%S", &tm);
+        }
+    }
 
     printf("Board name: %s\n", appl_init.board_inst->props.name);
     printf("Ref board PCB: %d\n", appl_init.board_inst->props.board_type);
     printf("API Target: 0x%x\n", appl_init.board_inst->props.target);
     printf("Compiled port count  (mesa): %d\n", mesa_port_cnt(NULL));
     printf("Ref board port count (meba): %d\n", meba_cnt);
+    printf("Build time (demo): %s %s\n", __DATE__, __TIME__);
+    printf("Image time (UTC):   %s\n", image_time);
     if (cap_sensor && mesa_temp_sensor_get(NULL, &temp_celsius) == MESA_RC_OK) {
         printf("Chip temperature: %d (C)\n", temp_celsius);
     }

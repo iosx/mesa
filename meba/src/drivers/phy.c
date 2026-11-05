@@ -72,8 +72,9 @@ mepa_rc meba_phy_conf_set(meba_inst_t inst, mepa_port_no_t port_no, const mepa_c
                 conf->speed == MESA_SPEED_AUTO && (cap & MEBA_PORT_CAP_100M_FDX) &&
                 !(cf.adv_dis & MEPA_ADV_DIS_FDX) && !(cf.adv_dis & MEPA_ADV_DIS_100M);
             cf.aneg.speed_1g_fdx =
-                ((cap & MEBA_PORT_CAP_1G_FDX) &&
-                 !(conf->speed == MESA_SPEED_AUTO && conf->adv_dis & MEPA_ADV_DIS_1G));
+                (cap & MEBA_PORT_CAP_1G_FDX) &&
+                (conf->speed == MESA_SPEED_1G ||
+                 (conf->speed == MESA_SPEED_AUTO && !(cf.adv_dis & MEPA_ADV_DIS_1G)));
             cf.aneg.no_restart_aneg = !!(cf.adv_dis & MEPA_ADV_DIS_RESTART_ANEG);
         }
     }

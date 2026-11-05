@@ -947,9 +947,15 @@ static mepa_rc lan887x_config_set(mepa_device_t *dev, const mepa_conf_t *config)
     mepa_bool_t re_config = PHY_FALSE;
     lan887x_reset_typ type = LAN887X_RST_SOFT;
 
-    if ((config->man_neg != MEPA_MANUAL_NEG_CLIENT &&
+    /*
+     * 100/1000BASE-T1 is full-duplex only, so fdx is not part of the
+     * configuration and must not invalidate the whole request. Callers that
+     * have no master/slave preference (e.g. the mesa demo) pass
+     * MEPA_MANUAL_NEG_DISABLED, which keeps the current preference.
+     */
+    if ((config->man_neg != MEPA_MANUAL_NEG_DISABLED &&
+         config->man_neg != MEPA_MANUAL_NEG_CLIENT &&
          config->man_neg != MEPA_MANUAL_NEG_REF) ||
-        (config->fdx != PHY_TRUE) ||
         (config->speed != MESA_SPEED_100M &&
          config->speed != MESA_SPEED_1G &&
          config->speed != MESA_SPEED_AUTO)) {
@@ -978,8 +984,9 @@ static mepa_rc lan887x_config_set(mepa_device_t *dev, const mepa_conf_t *config)
             data->conf.speed = speed;
         }
 
-        // Setup Master/Slave Mode
-        if (data->conf.man_neg != config->man_neg) {
+        // Setup Master/Slave Mode (DISABLED means "keep current preference")
+        if (config->man_neg != MEPA_MANUAL_NEG_DISABLED &&
+            data->conf.man_neg != config->man_neg) {
             re_config = PHY_TRUE;
             data->conf.man_neg = config->man_neg;
         }
