@@ -361,6 +361,9 @@ static void port_setup(mesa_port_no_t port_no, mesa_bool_t aneg, mesa_bool_t ini
         if (entry->media_type == MSCC_PORT_TYPE_CU) {
             if (pc->admin.enable) {
                 phy.admin.enable = 1;
+                if (!(cap & MEBA_PORT_CAP_AUTONEG)) {
+                    phy.man_neg = MEPA_MANUAL_NEG_REF;
+                }
                 if (pc->autoneg || pc->speed == MESA_SPEED_1G) {
                     // Auto negotiation
                     phy.speed = (pc->autoneg ? MESA_SPEED_AUTO : MESA_SPEED_1G);
@@ -1720,7 +1723,7 @@ static void port_init(meba_inst_t inst)
         case MESA_PORT_INTERFACE_QSGMII:
             entry->media_type = MSCC_PORT_TYPE_CU;
             pc->speed = (cap & MEBA_PORT_CAP_2_5G_FDX) ? MESA_SPEED_2500M : MESA_SPEED_1G;
-            pc->autoneg = 1;
+            pc->autoneg = (cap & MEBA_PORT_CAP_AUTONEG) ? 1 : 0;
             pc->flow_control = 1;
             break;
         case MESA_PORT_INTERFACE_SERDES:
