@@ -1,0 +1,51 @@
+#! /bin/sh
+
+# Copyright (c) 2004-2020 Microchip Technology Inc. and its subsidiaries.
+# SPDX-License-Identifier: MIT
+
+# Start the MESA demo application at boot on the Galaxy Space AIU board.
+#
+# mesa-demo is started with -f (foreground) and put in the background by the
+# shell: rcS is not blocked, but all trace output stays on the console instead
+# of being detached by daemon(). Other boards keep the previous behaviour
+# (start it by hand or from /mnt/mesa_demo_start): the regression tests start
+# their own mesa-demo instance, which would fail on the json-rpc port if one
+# was already running.
+
+DAEMON=/usr/bin/mesa-demo
+
+is_aiu()
+{
+    [ -r /proc/device-tree/model ] || return 1
+    tr -d '\0' < /proc/device-tree/model | grep -q "Galaxy Space"
+}
+
+case "$1" in
+    start|"")
+        if ! is_aiu; then
+            exit 0
+        fi
+        if [ ! -x "$DAEMON" ]; then
+            echo "$DAEMON not found"
+            exit 0
+        fi
+        if [ -n "$(pidof mesa-demo 2>/dev/null)" ]; then
+            echo "mesa-demo is already running"
+        else
+            echo "Starting mesa-demo (foreground output on console)"
+            "$DAEMON" -f &
+        fi
+        ;;
+
+    stop)
+        if [ -n "$(pidof mesa-demo 2>/dev/null)" ]; then
+            echo "Stopping mesa-demo"
+            killall mesa-demo
+        fi
+        ;;
+
+    *)
+        echo "Usage: $0 {start|stop}" >&2
+        exit 1
+        ;;
+esac
