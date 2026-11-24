@@ -3490,6 +3490,51 @@ static vtss_rc fa_port_conf_2g5_set(vtss_state_t *vtss_state, const vtss_port_no
     return VTSS_RC_OK;
 }
 
+/* Apply SerDes lane polarity explicitly.
+ *
+ * The polarity is normally programmed by fa_serdes_set(), but that is only
+ * called when the SerDes mode, speed or media type changes. Writing the bits
+ * here makes a polarity-only configuration change take effect as well.
+ */
+static vtss_rc fa_port_serdes_polarity_set(vtss_state_t *vtss_state,
+                                           const vtss_port_no_t port_no)
+{
+    const vtss_port_conf_t *conf = &vtss_state->port.conf[port_no];
+    u32                     sd_indx, sd_type;
+    vtss_rc                 rc;
+
+    if (conf->if_type != VTSS_PORT_INTERFACE_SFI) {
+        return VTSS_RC_OK;
+    }
+    rc = vtss_fa_port2sd(vtss_state, port_no, &sd_indx, &sd_type);
+    if (rc != VTSS_RC_OK) {
+        return rc;
+    }
+
+    if (sd_type == FA_SERDES_TYPE_25G) {
+#if defined(VTSS_FEATURE_SD_25G)
+        u32 tgt = VTSS_TO_SD25G_LANE(sd_indx);
+
+        REG_WRM(VTSS_SD25G_TARGET_LANE_40(tgt),
+                VTSS_F_SD25G_TARGET_LANE_40_LN_R_TX_POL_INV(conf->serdes.tx_invert) |
+                    VTSS_F_SD25G_TARGET_LANE_40_LN_R_RX_POL_INV(!conf->serdes.rx_invert),
+                VTSS_M_SD25G_TARGET_LANE_40_LN_R_TX_POL_INV |
+                    VTSS_M_SD25G_TARGET_LANE_40_LN_R_RX_POL_INV);
+#endif
+    } else {
+        u32 tgt = (sd_type == FA_SERDES_TYPE_6G) ? VTSS_TO_SD6G_LANE(sd_indx)
+                                                 : VTSS_TO_SD10G_LANE(sd_indx);
+
+        REG_WRM(VTSS_SD10G_LANE_TARGET_LANE_83(tgt),
+                VTSS_F_SD10G_LANE_TARGET_LANE_83_R_TX_POL_INV(conf->serdes.tx_invert) |
+                    VTSS_F_SD10G_LANE_TARGET_LANE_83_R_RX_POL_INV(!conf->serdes.rx_invert),
+                VTSS_M_SD10G_LANE_TARGET_LANE_83_R_TX_POL_INV |
+                    VTSS_M_SD10G_LANE_TARGET_LANE_83_R_RX_POL_INV);
+    }
+
+    return VTSS_RC_OK;
+}
+
 /* Configuration of the 5G, 10G and 25G devices (dev10G architecture) */
 static vtss_rc fa_port_conf_high_set(vtss_state_t *vtss_state, const vtss_port_no_t port_no)
 {
@@ -3547,6 +3592,8 @@ static vtss_rc fa_port_conf_high_set(vtss_state_t *vtss_state, const vtss_port_n
             VTSS_RC(fa_serdes_set(vtss_state, port_no, serdes_mode));
         }
     }
+
+    VTSS_RC(fa_port_serdes_polarity_set(vtss_state, port_no));
 
     /* Disable ASM/DSM 1G/2Gg5 counters */
     REG_WRM(VTSS_ASM_PORT_CFG(port), VTSS_F_ASM_PORT_CFG_CSC_STAT_DIS(1),
