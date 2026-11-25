@@ -1496,6 +1496,44 @@ static void fa_aqr_led_update(meba_inst_t               inst,
     }
 }
 
+/*
+ * AIU has the TX differential pair P/N swapped on the ports carrying the
+ * MEBA_PORT_CAP_SERDES_TX_INVERT capability. The API applies the polarity
+ * during port configuration, but the setting is lost if the SerDes is
+ * re-initialized afterwards. Re-assert it from the poll path as well, so the
+ * port works regardless of the order of the SerDes setup.
+ */
+static void fa_aiu_serdes_polarity_update(meba_inst_t inst, mesa_port_no_t port_no)
+{
+    meba_board_state_t      *board = INST2BOARD(inst);
+    const meba_port_entry_t *entry = &board->port[port_no].map;
+    uint32_t                 chip_port = entry->map.chip_port;
+    uint32_t                 addr, value = 0, mask = 0, reg;
+
+    if (!board->aiu || (entry->cap & (MEBA_PORT_CAP_SERDES_TX_INVERT |
+                                      MEBA_PORT_CAP_SERDES_RX_INVERT)) == 0) {
+        return;
+    }
+    if (chip_port < 56 || chip_port > 63) {
+        return;
+    }
+
+    if (entry->cap & MEBA_PORT_CAP_SERDES_TX_INVERT) {
+        value |= 0x2; // LN_R_TX_POL_INV
+        mask |= 0x2;
+    }
+    mask |= 0x8; // LN_R_RX_POL_INV
+    if ((entry->cap & MEBA_PORT_CAP_SERDES_RX_INVERT) == 0) {
+        value |= 0x8; // RX is inverted in the substrate by default
+    }
+
+    // SD25G lane n TARGET_LANE_40: ((0x10c98000 + 0x8000 * n) >> 2) + 0x140
+    addr = ((0x10c98000U + 0x8000U * (chip_port - 56U)) >> 2) + 0x140U;
+    if (mesa_reg_read(NULL, 0, addr, &reg) == MESA_RC_OK && ((reg & mask) != value)) {
+        (void)mesa_reg_write_masked(NULL, 0, addr, value, mask);
+    }
+}
+
 static mesa_rc fa_port_led_update(meba_inst_t                    inst,
                                   mesa_port_no_t                 port_no,
                                   const mesa_port_status_t      *status,
@@ -1514,6 +1552,8 @@ static mesa_rc fa_port_led_update(meba_inst_t                    inst,
     mesa_sgpio_mode_t mode_yellow_tower = MESA_SGPIO_MODE_OFF;
 
     T_N(inst, "port(%d): Link - %d", port_no, status->link);
+
+    fa_aiu_serdes_polarity_update(inst, port_no);
 
     if (!port_activity(inst, port_no, status)) {
         return rc;

@@ -765,6 +765,19 @@ static void cli_cmd_board_dump(cli_req_t *req)
     if (cap_sensor && mesa_temp_sensor_get(NULL, &temp_celsius) == MESA_RC_OK) {
         printf("Chip temperature: %d (C)\n", temp_celsius);
     }
+    if (strcmp(appl_init.board_inst->props.name, "AIU") == 0) {
+        mesa_port_conf_t pconf;
+        uint32_t         reg;
+
+        if (mesa_port_conf_get(NULL, 32, &pconf) == MESA_RC_OK) {
+            printf("Port 33 serdes tx_invert: %u, rx_invert: %u\n", pconf.serdes.tx_invert,
+                   pconf.serdes.rx_invert);
+        }
+        /* SD25G lane 7, TARGET_LANE_40 (TX/RX polarity) */
+        if (mesa_reg_read(NULL, 0, 0x4334140, &reg) == MESA_RC_OK) {
+            printf("SD25G lane 7 TARGET_LANE_40: 0x%08x\n", reg);
+        }
+    }
 }
 
 static cli_cmd_t cli_cmd_table[] = {

@@ -4515,6 +4515,7 @@ vtss_rc vtss_cil_port_conf_set_bulk(struct vtss_state_s *vtss_state)
     vtss_sd10g_media_type_t md_type_org = VTSS_SD10G_MEDIA_PR_NONE;
     vtss_serdes_mode_t      this_mode, sd_mode_org = VTSS_SERDES_MODE_DISABLE;
     vtss_port_speed_t       speed_org = VTSS_SPEED_UNDEFINED;
+    BOOL                    tx_invert_org = FALSE, rx_invert_org = FALSE;
     u64                     bulk_port_mask = vtss_state->port.bulk_port_mask, m64;
 
     /* Apply the stored port config in normal manner - serdes'es are skipped */
@@ -4534,7 +4535,10 @@ vtss_rc vtss_cil_port_conf_set_bulk(struct vtss_state_s *vtss_state)
         vtss_state->port.bulk_port_mask = 0;
 
         /* Find serdes'es with identical configuration: serdes-mode, arch-type,
-         * media-type and speed  */
+         * media-type, speed and lane polarity. The polarity must be part of the
+         * key: the SerDes setup below programs one res_struct for every lane in
+         * the group, so mixing ports with different TX/RX inversion would make
+         * the first port's polarity overwrite the others. */
         for (port_no = start_port; port_no < vtss_state->port_count; port_no++) {
             m64 = 1U;
             m64 <<= port_no;
@@ -4552,6 +4556,8 @@ vtss_rc vtss_cil_port_conf_set_bulk(struct vtss_state_s *vtss_state)
                 md_type_org = conf->serdes.media_type;
                 sd_mode_org = vtss_state->port.sd28_mode[vtss_fa_sd_lane_indx(vtss_state, port_no)];
                 speed_org = conf->speed;
+                tx_invert_org = conf->serdes.tx_invert;
+                rx_invert_org = conf->serdes.rx_invert;
             } else {
                 /* if next interface is different then break and apply */
                 if (vtss_fa_port2sd(vtss_state, port_no, &sdi, &this_type) != VTSS_RC_OK) {
@@ -4559,7 +4565,9 @@ vtss_rc vtss_cil_port_conf_set_bulk(struct vtss_state_s *vtss_state)
                 }
                 this_mode = vtss_state->port.sd28_mode[vtss_fa_sd_lane_indx(vtss_state, port_no)];
                 if ((sd_mode_org != this_mode) || (sd_type_org != this_type) ||
-                    (md_type_org != conf->serdes.media_type) || (speed_org != conf->speed)) {
+                    (md_type_org != conf->serdes.media_type) || (speed_org != conf->speed) ||
+                    (tx_invert_org != conf->serdes.tx_invert) ||
+                    (rx_invert_org != conf->serdes.rx_invert)) {
                     break;
                 }
             }
